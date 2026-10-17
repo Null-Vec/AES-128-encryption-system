@@ -1,135 +1,291 @@
-# AES-128 Encryption Implementation in C
+<div align="center">
 
-A from-scratch implementation of the **AES-128 (Advanced Encryption Standard)** block cipher in C, organized into three progressive modules — a basic pedagogical implementation, a modes-of-operation extension, and a hardware-accelerated variant using Intel AES-NI intrinsics.
+# 🔐 AES-128 in C 
 
----
+**End-to-end implementation of AES-128 encryption — no external crypto libraries.**
 
-## Repository Structure
+[![Language](https://img.shields.io/badge/Language-C-blue?style=flat-square&logo=c)](https://en.wikipedia.org/wiki/C_(programming_language))
+[![Standard](https://img.shields.io/badge/Standard-NIST%20FIPS%20197-green?style=flat-square)](https://csrc.nist.gov/publications/detail/fips/197/final)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)]()
 
-```
-crs2323_suparna/
-├── aes128basic/          # Standalone AES-128 encrypt/decrypt (no modes)
-│   ├── aes128.h          # Function prototypes
-│   ├── aes128.c          # Core AES-128 implementation
-│   └── main.c            # Test driver (NIST test vector)
-│
-├── aesmodes/             # AES-128 + Modes of Operation (file I/O)
-│   ├── aes128.h          # AES function prototypes
-│   ├── aes128.c          # Core AES-128 implementation
-│   ├── modes.h           # Mode function prototypes
-│   ├── modes.c           # ECB, CBC, CFB, OFB, CTR mode implementations
-│   ├── main.c            # Test driver (file encryption/decryption)
-│   └── guide.txt         # Compilation instructions
-│
-├── aesintrinsic/         # AES-128 using Intel AES-NI hardware intrinsics
-│   ├── aesni128.c        # Hardware-accelerated AES-128 implementation
-│   └── guide.txt         # Compilation instructions
-│
-└── AES_128_Implementation.pdf   # Reference documentation
-```
+</div>
 
 ---
 
-## Modules
+## 📖 What Is This?
 
-### 1. `aes128basic` — Core AES-128
+AES (Advanced Encryption Standard) is the world's most widely used symmetric encryption algorithm — powering HTTPS, disk encryption, VPNs, and more. Most developers treat it as a black box through libraries like OpenSSL. This project opens that box completely.
 
-A clean, well-commented implementation of the AES-128 algorithm built entirely from first principles. All four round transformations and the key schedule are implemented manually.
+Every single component is built by hand in plain C:
 
-**Key components:**
+- The **S-box** substitution tables
+- **Galois Field (GF 2⁸)** arithmetic
+- The **key schedule** that derives 11 round keys from a single 16-byte key
+- All four round transformations: `SubBytes`, `ShiftRows`, `MixColumns`, `AddRoundKey`
+- All five standard **modes of operation** (ECB, CBC, CFB, OFB, CTR)
+- **Intel AES-NI** hardware acceleration via CPU intrinsics
+
+Each function is commented to explain *why* it exists, not just *what* it does.
+
+---
+
+## 📁 Project Structure
+
+```
+📦 AES-128-in-C/
+│
+├── 📂 aes128basic/            ← Module 1: Start here — pure AES-128
+│   ├── aes128.h               #   Function prototypes
+│   ├── aes128.c               #   Complete AES-128 encrypt + decrypt engine
+│   └── main.c                 #   NIST FIPS-197 test vector driver
+│
+├── 📂 aesmodes/               ← Module 2: AES + 5 modes, works on real files
+│   ├── aes128.h / aes128.c    #   Same core engine
+│   ├── modes.h / modes.c      #   ECB, CBC, CFB, OFB, CTR
+│   └── main.c                 #   File encrypt/decrypt driver
+│
+├── 📂 aesintrinsic/           ← Module 3: Hardware-accelerated via Intel AES-NI
+│   └── aesni128.c             #   Uses _mm_aesenc_si128 and friends
+│
+└── 📄 AES_128_Implementation.pdf  ← Full reference documentation
+```
+
+> **Recommended learning path:** Module 1 → Module 2 → Module 3
+
+---
+
+## 🧩 Module 1 — Core AES-128 (`aes128basic`)
+
+### How AES-128 Works
+
+AES treats every 16 bytes of data as a **4×4 grid of bytes** called the *state*. It then scrambles that grid through **10 rounds**, each applying four transformations in sequence:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        ONE AES ROUND                             │
+│                                                                  │
+│  ① SubBytes    — Swap each byte through the 256-entry S-box.    │
+│                  This adds non-linearity (breaks patterns).      │
+│                                                                  │
+│  ② ShiftRows   — Cyclically shift each row left by its index.   │
+│                  Row 0 stays, Row 1 shifts 1, Row 2 shifts 2...  │
+│                                                                  │
+│  ③ MixColumns  — Matrix-multiply each column in GF(2⁸).        │
+│                  Diffuses changes across bytes. Skipped in       │
+│                  the final (10th) round.                         │
+│                                                                  │
+│  ④ AddRoundKey — XOR the state with this round's 16-byte key.   │
+│                  The only step that actually uses the key.       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+Decryption is the exact reverse: each step has an inverse (`InvSubBytes`, `InvShiftRows`, `InvMixColumns`), applied in opposite order.
+
+### The Key Schedule
+
+Your 16-byte secret key never gets used directly in each round. Instead, it gets **expanded** into 176 bytes — 11 separate 16-byte round keys. This expansion involves:
+
+1. **RotWord** — rotate 4 bytes left by one position
+2. **SubWord** — pass all 4 bytes through the S-box
+3. XOR with a **round constant (Rcon)** to prevent symmetry between rounds
+
+```
+Original Key (16 bytes)
+       │
+       ▼
+  Key Schedule
+  ┌─────────┐
+  │ Round 0 │  ← used in initial AddRoundKey (before round 1)
+  │ Round 1 │  ← used in round 1
+  │ Round 2 │  ← used in round 2
+  │  ...    │
+  │ Round 10│  ← used in final round
+  └─────────┘
+  (176 bytes total)
+```
+
+### Galois Field Arithmetic
+
+`MixColumns` multiplies bytes using **GF(2⁸)** arithmetic — that is, polynomial multiplication modulo the irreducible polynomial `x⁸ + x⁴ + x³ + x + 1` (= `0x11b`). The `galois_mult()` function implements this as a simple bit-shift loop, which is both efficient and readable.
+
+### Function Reference
 
 | Function | Description |
 |---|---|
-| `key_expansion()` | Expands a 16-byte key into 176 bytes (11 round keys) using SubWord, RotWord, and Rcon |
-| `aes_encrypt()` | Encrypts a 16-byte plaintext block |
-| `aes_decrypt()` | Decrypts a 16-byte ciphertext block |
-| `subbytes()` / `invsubbytes()` | S-box and inverse S-box byte substitution |
-| `shift_row()` / `invshift_row()` | Row shift and inverse row shift |
-| `mixcolumn()` / `invmixcolumn()` | Column mixing via Galois Field multiplication |
-| `Add_roundkey()` | XOR state with the current round key |
-| `galois_mult()` | Multiplication in GF(2⁸) with the AES irreducible polynomial (0x1b) |
+| `key_expansion(key, expandedkey)` | Expand 16-byte key → 176-byte schedule |
+| `aes_encrypt(expandedkey, plaintext, ciphertext)` | Encrypt one 16-byte block |
+| `aes_decrypt(expandedkey, ciphertext, plaintext)` | Decrypt one 16-byte block |
+| `subbytes(state)` | Apply S-box to all 16 bytes |
+| `invsubbytes(state)` | Apply inverse S-box to all 16 bytes |
+| `shift_row(state)` | Cyclically shift rows left |
+| `invshift_row(state)` | Cyclically shift rows right |
+| `mixcolumn(state)` | GF(2⁸) column mixing |
+| `invmixcolumn(state)` | Inverse GF(2⁸) column mixing |
+| `Add_roundkey(state, roundkey)` | XOR state with round key |
+| `galois_mult(a, b)` | Multiply two bytes in GF(2⁸) |
+| `subword(word)` | S-box substitution for key schedule |
+| `rotate_word(word)` | Left-rotate 4-byte word for key schedule |
 
-**Test vector (from NIST FIPS-197):**
+---
+
+## 🔄 Module 2 — Modes of Operation (`aesmodes`)
+
+AES itself only encrypts **exactly 16 bytes** at a time. To encrypt a file of any length, you need a **mode of operation** — a rule for how to chain AES calls together.
+
+### The 5 Modes
+
+#### ① ECB — Electronic Codebook
+Each 16-byte block is encrypted completely independently.
 
 ```
-Key:       2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c
-Plaintext: 32 43 f6 a8 88 5a 30 8d 31 31 98 a2 e0 37 07 34
-Expected:  39 25 84 1d 02 dc 09 fb dc 11 85 97 19 6a 0b 32
+Plaintext Block 1 ──► [AES] ──► Ciphertext Block 1
+Plaintext Block 2 ──► [AES] ──► Ciphertext Block 2
+Plaintext Block 3 ──► [AES] ──► Ciphertext Block 3
+```
+
+> ⚠️ **Do not use for real data.** Equal plaintext blocks produce equal ciphertext blocks — an attacker can see patterns without decrypting anything. Included here for educational comparison only.
+
+---
+
+#### ② CBC — Cipher Block Chaining ✅ *(most common)*
+Each block is XORed with the previous ciphertext block before encryption. An **Initialization Vector (IV)** handles the first block.
+
+```
+     IV
+      │
+      ▼
+PT₁ ─XOR─► [AES] ──► CT₁
+                        │
+                        ▼
+PT₂ ─────► [AES] ──► CT₂   (CT₁ is XORed into PT₂ first)
+```
+
+- Hides repeated plaintext patterns ✅
+- Uses **PKCS#7 padding** to handle inputs that aren't a multiple of 16 bytes
+- IV is prepended to the output file automatically
+
+---
+
+#### ③ CFB — Cipher Feedback
+Turns AES into a **stream cipher** — no padding needed, can encrypt any length.
+
+```
+IV ──► [AES] ──► XOR ──► CT₁
+                  ↑
+                 PT₁        (CT₁ feeds back as the next IV)
 ```
 
 ---
 
-### 2. `aesmodes` — Modes of Operation
+#### ④ OFB — Output Feedback
+The **AES output** (keystream) — not the ciphertext — feeds back into the next block. Encrypt and decrypt use the *exact same function*.
 
-Extends the core AES-128 implementation with all major **block cipher modes of operation**, operating directly on binary files. Supports both encryption and decryption for each mode.
+```
+IV ──► [AES] ──► KS₁ ──► XOR ──► CT₁
+                  │         ↑
+             (feed back)   PT₁
+```
 
-**Implemented modes:**
+---
 
-| Mode | Function(s) | Notes |
+#### ⑤ CTR — Counter Mode
+Encrypts a monotonically increasing counter to generate a keystream. Fully **parallelizable** — great for performance.
+
+```
+IV||0 ──► [AES] ──► XOR ──► CT₁
+              ↑
+             PT₁
+
+IV||1 ──► [AES] ──► XOR ──► CT₂
+              ↑
+             PT₂
+```
+
+### Modes Function Reference
+
+| Function | Mode | Direction |
 |---|---|---|
-| **ECB** (Electronic Codebook) | `ecb_encrypt()`, `ecb_decrypt()` | PKCS#7 padding |
-| **CBC** (Cipher Block Chaining) | `cbc_encrypt()`, `cbc_decrypt()` | IV prepended to output; PKCS#7 padding |
-| **CFB** (Cipher Feedback) | `cfb_encrypt()`, `cfb_decrypt()` | IV prepended to output; stream-cipher-like |
-| **OFB** (Output Feedback) | `ofb()` | Symmetric encrypt/decrypt; same function used for both |
-| **CTR** (Counter) | `ctr()` | 32-bit little-endian counter in the IV's LSBs |
-
-**IV:** A hardcoded 128-bit initialization vector `{0x01, 0x02, ...}` is used. For production use, replace with a cryptographically random IV.
-
-**File I/O:** Operates on binary files. Uncomment the desired mode call in `main.c` and point `ifile`/`ofile` to your input/output files.
+| `ecb_encrypt(ifile, ofile, key)` | ECB | Encrypt |
+| `ecb_decrypt(ifile, ofile, key)` | ECB | Decrypt |
+| `cbc_encrypt(ifile, ofile, key)` | CBC | Encrypt |
+| `cbc_decrypt(ifile, ofile, key)` | CBC | Decrypt |
+| `cfb_encrypt(ifile, ofile, key)` | CFB | Encrypt |
+| `cfb_decrypt(ifile, ofile, key)` | CFB | Decrypt |
+| `ofb(ifile, ofile, key)` | OFB | Both (same function) |
+| `ctr(ifile, ofile, key)` | CTR | Both (same function) |
 
 ---
 
-### 3. `aesintrinsic` — AES-NI Hardware Acceleration
+## ⚡ Module 3 — Hardware Acceleration (`aesintrinsic`)
 
-A high-performance AES-128 implementation using **Intel AES-NI** CPU instructions via the `<wmmintrin.h>` intrinsics header. Produces identical results to the software implementation but with significantly lower latency.
+Modern Intel/AMD CPUs have AES built directly into silicon. This module uses those instructions via the `<wmmintrin.h>` intrinsics header. The result is **bit-for-bit identical** to Module 1 — just dramatically faster.
 
-**Key components:**
+### AES-NI Instructions Used
 
-| Function | Description |
+| Intrinsic | What It Does |
 |---|---|
-| `AES_128_Key_Expansion()` | Key schedule using `_mm_aeskeygenassist_si128` |
-| `AES_128_ASSIST()` | Helper for the key expansion assist step |
-| `aes_encrypt()` | 10-round encryption using `_mm_aesenc_si128` / `_mm_aesenclast_si128` |
-| `aes_decrypt()` | 10-round decryption using `_mm_aesdec_si128` / `_mm_aesdeclast_si128` and `_mm_aesimc_si128` |
+| `_mm_aeskeygenassist_si128` | Hardware key schedule generation |
+| `_mm_aesenc_si128` | Full AES encryption round (rounds 1–9) |
+| `_mm_aesenclast_si128` | Final encryption round (no MixColumns) |
+| `_mm_aesdec_si128` | Full AES decryption round |
+| `_mm_aesdeclast_si128` | Final decryption round |
+| `_mm_aesimc_si128` | Convert forward key schedule for decryption |
 
-> **CPU requirement:** Requires a processor with AES-NI support (Intel Westmere / AMD Bulldozer or later).
+> **CPU requirement:** Intel Westmere (2010+) or AMD Bulldozer (2011+). Nearly all modern desktop/laptop CPUs qualify.
 
 ---
 
-## Building & Running
+## 🚀 Build & Run
 
 ### Prerequisites
 
-- GCC (MinGW on Windows or GCC on Linux/macOS)
-- AES-NI capable CPU (for the `aesintrinsic` module only)
+| Tool | Windows | Linux / macOS |
+|---|---|---|
+| Compiler | [MinGW-w64 (GCC)](https://www.mingw-w64.org/) | GCC via package manager |
+| AES-NI support | Required only for Module 3 | Required only for Module 3 |
+
+Check AES-NI support on your machine:
+```bash
+# Linux
+grep -m1 aes /proc/cpuinfo
+
+# Windows PowerShell
+(Get-WmiObject -Class Win32_Processor).Name
+```
 
 ---
 
-### `aes128basic`
+### 📦 Module 1 — `aes128basic`
 
 ```bash
 cd aes128basic
 
 # Compile
+gcc -o aesprogram aes128.c main.c
+
+# Windows
 gcc -o aesprogram.exe aes128.c main.c
 
 # Run
-./aesprogram.exe
+./aesprogram
 ```
 
 **Expected output:**
 ```
 Expanded round key:
-2b7e1516 ...
+2b 7e 15 16 28 ae d2 a6 ab f7 15 88 09 cf 4f 3c
+a0 fa fe 17 88 54 2c b1 23 a3 39 39 2a 6c 76 05
+...
 
-Plaintext : 3243f6a8885a308d313198a2e0370734
-ciphertext : 3925841d02dc09fbdc118597196a0b32
-Decrypted text : 3243f6a8885a308d313198a2e0370734
+Plaintext  : 3243f6a8885a308d313198a2e0370734
+Ciphertext : 3925841d02dc09fbdc118597196a0b32   ← must match NIST FIPS-197 ✅
+Decrypted  : 3243f6a8885a308d313198a2e0370734   ← must match original ✅
 ```
 
 ---
 
-### `aesmodes`
+### 📦 Module 2 — `aesmodes`
 
 ```bash
 cd aesmodes
@@ -138,18 +294,26 @@ cd aesmodes
 gcc -c aes128.c          # produces aes128.o
 gcc -c modes.c           # produces modes.o
 
-# Step 2: Link and compile
-gcc -o a.exe main.c aes128.o modes.o
+# Step 2: Link
+gcc -o aesmodes main.c aes128.o modes.o
 
-# Run (after uncommenting the desired mode in main.c)
-./a.exe
+# Windows
+gcc -o aesmodes.exe main.c aes128.o modes.o
 ```
 
-To select a mode, edit `main.c` and uncomment exactly one of:
+**Before running**, open `main.c` and:
+
+1. Point the file handles at your input and output files:
 ```c
-ecb_encrypt(ifile, ofile, ExpandedKey);
+FILE *ifile = fopen("plaintext.txt", "rb");
+FILE *ofile = fopen("encrypted.bin", "wb");
+```
+
+2. Uncomment exactly **one** mode function (all others must be commented out):
+```c
+// ecb_encrypt(ifile, ofile, ExpandedKey);
 // ecb_decrypt(ifile, ofile, ExpandedKey);
-// cbc_encrypt(ifile, ofile, ExpandedKey);
+   cbc_encrypt(ifile, ofile, ExpandedKey);  // ← uncomment this one
 // cbc_decrypt(ifile, ofile, ExpandedKey);
 // cfb_encrypt(ifile, ofile, ExpandedKey);
 // cfb_decrypt(ifile, ofile, ExpandedKey);
@@ -157,79 +321,178 @@ ecb_encrypt(ifile, ofile, ExpandedKey);
 // ctr(ifile, ofile, ExpandedKey);
 ```
 
+3. Recompile and run.
+
 ---
 
-### `aesintrinsic`
+### 📦 Module 3 — `aesintrinsic`
 
 ```bash
 cd aesintrinsic
 
-# Compile with AES-NI and SSE2 flags
+# Compile (the -maes and -msse2 flags enable AES-NI instructions)
+gcc -maes -msse2 -o aesni128 aesni128.c
+
+# Windows
 gcc -maes -msse2 -o aesni128.exe aesni128.c
 
 # Run
-./aesni128.exe
+./aesni128
 ```
 
 ---
 
-## AES-128 Algorithm Overview
+## 🧪 Step-by-Step Testing Guide
 
-AES-128 operates on a 4×4 byte **state matrix** with a 128-bit key over **10 rounds**.
+### ✅ Test 1 — Verify against the NIST Standard (Module 1)
 
-**Encryption round structure:**
-1. **AddRoundKey** — XOR state with round key
-2. **SubBytes** — Non-linear byte substitution via S-box
-3. **ShiftRows** — Cyclically shift rows left (row `i` shifts by `i` positions)
-4. **MixColumns** — Linear mix of each column in GF(2⁸) *(skipped in the final round)*
+This test confirms your AES core is mathematically correct.
 
-**Decryption** applies the inverse of each operation in reverse order using the inverse S-box, right shifts, and inverse MixColumns coefficients (`0x0e`, `0x0b`, `0x0d`, `0x09`).
+```bash
+cd aes128basic
+gcc -o aesprogram aes128.c main.c
+./aesprogram
+```
 
-**Key Schedule:** The 16-byte key is expanded to 176 bytes providing one 16-byte round key per round (rounds 0–10).
-
----
-
-## Notes
-
-- All implementations use **column-major** state ordering consistent with the AES specification.
-- The `aesmodes` module uses **PKCS#7 padding** for ECB and CBC modes.
-- The AES-NI implementation uses `_mm_aesimc_si128` (Inverse MixColumns) during decryption to convert the forward key schedule to the equivalent inverse key schedule on the fly.
-- The `ftruncate` call in `ecb_decrypt` / `cbc_decrypt` is POSIX-specific and may require adjustment on Windows (use `_chsize` or `SetEndOfFile`).
+Look for this line in the output:
+```
+Ciphertext : 3925841d02dc09fbdc118597196a0b32
+```
+This is the exact value in **NIST FIPS-197, Appendix B**. If it matches, the engine is correct.
 
 ---
 
-## References
+### ✅ Test 2 — Encrypt then Decrypt a File (Module 2)
 
-- [NIST FIPS 197 — Advanced Encryption Standard](https://csrc.nist.gov/publications/detail/fips/197/final)
-- [Intel AES-NI White Paper](https://www.intel.com/content/www/us/en/developer/articles/technical/advanced-encryption-standard-instructions-aes-ni.html)
+This test proves encrypt → decrypt gives back the original file.
 
+**Step 1 — Create a test file**
+```bash
+# Linux/macOS
+echo "Hello AES World! This is a test message." > plaintext.txt
+
+# Windows PowerShell
+"Hello AES World! This is a test message." | Out-File -Encoding ascii plaintext.txt
+```
+
+**Step 2 — Encrypt it**
+
+In `aesmodes/main.c`:
+```c
+FILE *ifile = fopen("plaintext.txt", "rb");
+FILE *ofile = fopen("encrypted.bin", "wb");
+// uncomment:
+cbc_encrypt(ifile, ofile, ExpandedKey);
+```
+Recompile and run → `encrypted.bin` is created.
+
+**Step 3 — Decrypt it**
+
+In `aesmodes/main.c`:
+```c
+FILE *ifile = fopen("encrypted.bin", "rb");
+FILE *ofile = fopen("decrypted.txt", "wb");
+// uncomment:
+cbc_decrypt(ifile, ofile, ExpandedKey);
+```
+Recompile and run → `decrypted.txt` is created.
+
+**Step 4 — Verify they match**
+```bash
+# Linux/macOS
+diff plaintext.txt decrypted.txt
+# (no output = files are identical ✅)
+
+# Windows PowerShell
+fc plaintext.txt decrypted.txt
+```
+
+Repeat this test with **different modes** (CFB, OFB, CTR) to see that they all round-trip correctly.
 
 ---
 
-## Author
+### ✅ Test 3 — Confirm AES-NI Gives the Same Result (Module 3)
 
-**Suparna**
-Course: CrS 2323
-Academic implementation for educational purposes.
+The hardware and software implementations should produce **identical output**.
+
+Edit `aesintrinsic/aesni128.c` to use the same key as Module 1:
+```c
+unsigned char userkey[16] = {
+    0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+    0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c
+};
+```
+
+Compile and run:
+```bash
+gcc -maes -msse2 -o aesni128 aesni128.c
+./aesni128
+```
+
+Expected ciphertext:
+```
+3925841d02dc09fbdc118597196a0b32   ← identical to Module 1 ✅
+```
+
+This confirms the hardware path and software path are interchangeable.
 
 ---
 
-## Disclaimer
+### 🧩 Bonus — Try All 5 Modes on the Same File
 
-This project is a **learning implementation** of AES-128 written for educational purposes. It is **not intended for production use**.
+Run this sequence to compare all five modes on the same input. Each should decrypt back to the original:
 
-Specific limitations to be aware of:
-
-- The IV in `aesmodes` is hardcoded (`{0x01, 0x02, ...}`). A secure implementation must use a cryptographically random IV generated fresh for every encryption operation.
-- No authenticated encryption (no MAC or AEAD). The ciphertext is not integrity-protected and is vulnerable to tampering.
-- ECB mode is included for completeness but is **inherently insecure** for most data — it leaks patterns in the plaintext.
-- The `ftruncate` call used in `ecb_decrypt` / `cbc_decrypt` is POSIX-specific; on Windows, use `_chsize` or `SetEndOfFile` instead.
-- Side-channel resistance (timing, cache) has not been considered.
-
-For real-world encryption, use a well-audited library such as [OpenSSL](https://www.openssl.org/) or [libsodium](https://libsodium.org/).
+| Mode | Encrypt function | Decrypt function | Notes |
+|---|---|---|---|
+| ECB | `ecb_encrypt` | `ecb_decrypt` | Identical blocks → identical output (pattern leak) |
+| CBC | `cbc_encrypt` | `cbc_decrypt` | Each block depends on previous |
+| CFB | `cfb_encrypt` | `cfb_decrypt` | Stream cipher, no padding |
+| OFB | `ofb` | `ofb` (same!) | Same function for both directions |
+| CTR | `ctr` | `ctr` (same!) | Same function for both directions |
 
 ---
 
-## License
+## ⚠️ Known Limitations
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+| Issue | Detail |
+|---|---|
+| **`ftruncate` is POSIX-only** | Used in `ecb_decrypt` / `cbc_decrypt` to remove PKCS#7 padding. On Windows with MSVC, replace with `_chsize(fileno(ofile), pos)`. MinGW (GCC on Windows) supports it fine. |
+| **Hardcoded IV** | The IV in `aesmodes` is a fixed `{0x01, 0x02, ...}`. A real implementation must generate a **cryptographically random IV** for every encryption operation. |
+| **No message authentication** | There is no MAC, HMAC, or AEAD. Ciphertext can be silently tampered with. For real use, consider AES-GCM instead. |
+| **No side-channel mitigations** | Table-lookup-based S-box is vulnerable to **cache-timing attacks**. This is an educational implementation, not a hardened one. |
+| **ECB mode** | Fundamentally insecure for any structured data — included only to illustrate *why* the other modes exist. |
+
+---
+
+## 📚 Further Reading
+
+| Resource | What You'll Learn |
+|---|---|
+| [NIST FIPS-197](https://csrc.nist.gov/publications/detail/fips/197/final) | The official AES specification this code implements |
+| [Intel AES-NI White Paper](https://www.intel.com/content/www/us/en/developer/articles/technical/advanced-encryption-standard-instructions-aes-ni.html) | How hardware acceleration works in Module 3 |
+| [Rijndael S-box (Wikipedia)](https://en.wikipedia.org/wiki/Rijndael_S-box) | How the S-box was mathematically constructed |
+| [Galois Field Arithmetic (Wikipedia)](https://en.wikipedia.org/wiki/Finite_field_arithmetic) | The math behind `MixColumns` and `galois_mult()` |
+| [Block cipher modes (Wikipedia)](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation) | Visual diagrams for ECB, CBC, CFB, OFB, CTR |
+
+---
+
+## 👤 Author
+
+**Suparna** — Indian Statistical Institute, Kolkata
+ 
+Academic implementation, written for educational purposes.
+
+---
+
+## 📄 License
+
+Released under the [MIT License](LICENSE). Use freely for learning and reference.
+
+---
+
+<div align="center">
+
+> ⚠️ **Not for production use.** This is a learning implementation. For real-world encryption,  
+> use an audited library like [OpenSSL](https://www.openssl.org/) or [libsodium](https://libsodium.org/).
+
+</div>
