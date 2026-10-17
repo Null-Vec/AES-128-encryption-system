@@ -1,0 +1,4 @@
+1) Header Compilation: gcc -c aes128.c --->This should generate "aes128.o"
+		       gcc -c modes.c ----> This should generate "modes.o"
+	
+2) Compilation with static linking: gcc -o main.c aes128.o modes.o

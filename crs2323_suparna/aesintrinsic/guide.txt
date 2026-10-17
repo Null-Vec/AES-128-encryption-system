@@ -1,0 +1,1 @@
+gcc -maes -msse2 -o aesni128.exe aesni128.c

@@ -1,0 +1,11 @@
+# Compiled binaries
+*.exe
+*.out
+
+# Object files
+*.o
+
+# Test/sample output files (binary encrypted/decrypted artifacts)
+aesmodes/enc.pdf
+aesmodes/dec.pdf
+aesmodes/test.pdf
